@@ -83,18 +83,14 @@ function loadData(key, defaultValue = []) {
 
 function loadAppConfig() {
     const defaultConfig = {
-        nomeLoja: "Luckhouse Games",
-        cnpj: "43.864.000/198",
+        nomeLoja: "Luckhouse Games", cnpj: "43.864.000/198",
         endereco: "Av. Itália, 200 – Shopping Amarilys, Itupeva – SP",
-        telefone: "(11) 99357-7209",
-        email: "luckhousegames@gmail.com",
-        logoUrl: "assets/logo.png",
-        diasGarantiaPadrao: 90,
+        telefone: "(11) 99357-7209", email: "luckhousegames@gmail.com",
+        logoUrl: "assets/logo.png", diasGarantiaPadrao: 90,
         podiumGamesWhatsapp: "",
         whatsappEnvioTicket: "",
-        templateOsCliente: "Olá, {cliente_nome}! A sua Ordem de Serviço #{os_id}, referente ao equipamento {os_equipamento}, teve o status atualizado para: *{os_status}*. Atenciosamente, {loja_nome}.",
-        templateEnvioPodium: "Olá, {cliente_nome}! Seu equipamento ({os_equipamento} - OS #{os_id}) foi enviado para entrega. Por favor, aguarde o contato do entregador. Atenciosamente, {loja_nome}.",
-        templateReqEstoque: "Olá, Podium Games! Gostaria de solicitar um novo lote de produtos para a {loja_nome}. Segue a lista:\n\n{lista_produtos}\n\nPor favor, nos informe sobre a disponibilidade e o prazo. Obrigado!"
+        templateOsCliente: "Olá, {cliente_nome}! Novidades sobre sua OS #{os_id} na {loja_nome}: o status foi atualizado para '{os_status}'. Equipamento: {os_equipamento}.",
+        templateReqEstoque: "Olá, Podium Games! Gostaria de solicitar os seguintes itens para a {loja_nome}:\n\n{lista_produtos}\n\nObrigado!"
     };
     STORE_CONFIG = loadData('luckhouse_config', defaultConfig);
     updateStoreInfoUI();
@@ -142,7 +138,6 @@ function updateStoreInfoUI() {
             setVal('config-podium-games-whatsapp', STORE_CONFIG.podiumGamesWhatsapp);
             setVal('config-whatsapp-envio-ticket', STORE_CONFIG.whatsappEnvioTicket);
             setVal('config-template-os-cliente', STORE_CONFIG.templateOsCliente);
-            setVal('config-template-envio-podium', STORE_CONFIG.templateEnvioPodium);
             setVal('config-template-req-estoque', STORE_CONFIG.templateReqEstoque);
         }
         updateTermoGarantiaPreview();
@@ -236,7 +231,6 @@ function setupConfiguracoesModule() {
         STORE_CONFIG.podiumGamesWhatsapp = document.getElementById('config-podium-games-whatsapp').value.trim();
         STORE_CONFIG.whatsappEnvioTicket = document.getElementById('config-whatsapp-envio-ticket').value.trim();
         STORE_CONFIG.templateOsCliente = document.getElementById('config-template-os-cliente').value;
-        STORE_CONFIG.templateEnvioPodium = document.getElementById('config-template-envio-podium').value;
         STORE_CONFIG.templateReqEstoque = document.getElementById('config-template-req-estoque').value;
         saveAppConfig();
     });
@@ -702,8 +696,6 @@ window.faturarOSnoPDV = function(osId) {
 
 
 // --- PDV MODULE ---
-// UNCHANGED FROM PREVIOUS VERSION
-
 function setupPdvModule() {
     document.getElementById('btn-pdv-search-item').addEventListener('click', window.searchPdvItems);
     document.getElementById('pdv-discount-percentage').addEventListener('input', updatePdvTotals);
@@ -891,15 +883,13 @@ async function generateSaleReceiptPdf(isPreview, saleData = null) {
     // Header
     if (STORE_CONFIG.logoUrl) {
         try {
-            const imgResponse = await fetch(STORE_CONFIG.logoUrl);
-            const blob = await imgResponse.blob();
-            const imgData = await new Promise((resolve) => {
+            const imgData = await fetch(STORE_CONFIG.logoUrl).then(res => res.blob()).then(blob => new Promise((resolve) => {
                 const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
+                reader.onload = () => resolve(reader.result);
                 reader.readAsDataURL(blob);
-            });
+            }));
             doc.addImage(imgData, 'PNG', 14, 10, 30, 10);
-        } catch (e) { console.error("Erro ao carregar logo para PDF", e); }
+        } catch (e) { console.error("Erro ao carregar logo para PDF"); }
     }
     doc.setFontSize(14).setFont("helvetica", "bold").text(STORE_CONFIG.nomeLoja, 105, 15, { align: "center" });
     doc.setFontSize(8).setFont("helvetica", "normal").text(`${STORE_CONFIG.endereco}\nCNPJ: ${STORE_CONFIG.cnpj} | Tel: ${STORE_CONFIG.telefone}`, 105, 20, { align: "center" });
@@ -975,6 +965,221 @@ async function generateSaleReceiptPdf(isPreview, saleData = null) {
 
 // ADMIN AREA
 // UNCHANGED FROM PREVIOUS VERSION
+
+// --- Envio Podium Module ---
+function setupEnvioPodiumModule() {
+    document.getElementById('btn-gerar-ticket-podium').addEventListener('click', handleGerarTicketPodium);
+    document.getElementById('btn-enviar-ticket-whatsapp').addEventListener('click', enviarTicketPodiumViaWhatsApp);
+}
+
+function renderPodiumOSList() {
+    const container = document.getElementById('podium-os-list-container');
+    const osProntasParaEnvio = ORDENS_SERVICO.filter(os => os.status === 'Aberta');
+    if (osProntasParaEnvio.length === 0) {
+        container.innerHTML = '<p class="text-muted p-2">Nenhuma OS pronta para envio.</p>';
+        return;
+    }
+    container.innerHTML = `<ul class="list-group">${osProntasParaEnvio.map(os => {
+        const cliente = CLIENTES.find(c => c.id === os.clienteId);
+        return `<li class="list-group-item bg-dark-secondary text-white">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" value="${os.id}" id="podium-os-${os.id}">
+                <label class="form-check-label" for="podium-os-${os.id}">
+                    <strong>OS #${String(os.id).padStart(3, '0')}</strong> - ${cliente ? cliente.nome : 'N/A'}
+                    <small class="d-block text-muted">Endereço: ${cliente ? (cliente.endereco || 'Não cadastrado') : ''}</small>
+                </label>
+            </div></li>`;
+    }).join('')}</ul>`;
+}
+
+function getSelectedEntregas() {
+    const checkedBoxes = document.querySelectorAll('#podium-os-list-container .form-check-input:checked');
+    if (checkedBoxes.length === 0) {
+        showToast("Selecione ao menos uma OS para o envio.", "warning");
+        return null;
+    }
+    const osIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+    return osIds.map(id => {
+        const os = ORDENS_SERVICO.find(o => o.id === id);
+        const cliente = CLIENTES.find(c => c.id === os?.clienteId);
+        return { os, cliente };
+    }).filter(e => e.os && e.cliente);
+}
+
+async function handleGerarTicketPodium() {
+    const entregas = getSelectedEntregas();
+    if (!entregas) return;
+
+    const ticketHtml = await preparePodiumTicketHtml(entregas);
+    const printArea = document.getElementById('podium-ticket-print-area');
+    printArea.innerHTML = ticketHtml;
+    printArea.classList.remove('d-none');
+    
+    showToast("Comprovante gerado! Preparando impressão.", "success");
+    setTimeout(() => { window.print(); printArea.classList.add('d-none'); }, 500);
+}
+
+async function enviarTicketPodiumViaWhatsApp() {
+    const entregas = getSelectedEntregas();
+    if (!entregas) return;
+
+    const targetWhatsapp = STORE_CONFIG.whatsappEnvioTicket;
+    if (!targetWhatsapp) {
+        showToast("WhatsApp para envio de tickets não configurado!", "danger");
+        return;
+    }
+
+    let message = `*COMPROVANTE DE ENTREGA - ${STORE_CONFIG.nomeLoja}*\n\n`;
+    message += `Olá! Seguem os detalhes para a entrega do(s) seguinte(s) item(ns):\n`;
+    
+    entregas.forEach(entrega => {
+        message += `\n----------------------------------\n`;
+        message += `*Cliente:* ${entrega.cliente.nome}\n`;
+        message += `*OS:* #${String(entrega.os.id).padStart(3, '0')}\n`;
+        message += `*Equipamento:* ${entrega.os.equipamentoTipo} ${entrega.os.equipamentoMarca}\n`;
+        message += `*Serial:* ${entrega.os.equipamentoSerial || 'N/A'}\n`;
+        message += `*Problema Relatado:* ${entrega.os.problemaDescricao}\n`;
+        message += `*Solução/Observações:* ${entrega.os.observacoes || 'N/A'}\n`;
+    });
+    
+    message += `\n----------------------------------\n`;
+    message += `Por favor, confirme o recebimento assinando o comprovante físico.`;
+
+    const cleanTelefone = targetWhatsapp.replace(/\D/g, '');
+    const whatsappUrl = `https://wa.me/${cleanTelefone}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, '_blank');
+}
+
+
+async function preparePodiumTicketHtml(entregas) {
+    let html = `<div class="podium-ticket" style="font-family: monospace; color: #000;">`;
+    html += `<h3 style="text-align: center; margin-bottom: 5px;">COMPROVANTE DE ENTREGA</h3>`;
+    html += `<p style="text-align: center; font-size: 9pt;">${STORE_CONFIG.nomeLoja}</p><hr>`;
+    
+    const barcodeValue = `ENT-${new Date().getTime()}`;
+    const barcodeSVG = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    JsBarcode(barcodeSVG, barcodeValue, { format: "CODE128", displayValue: true, fontSize: 10, height: 30 });
+    html += `<div style="text-align:center; margin-top:5px; margin-bottom: 10px;">${barcodeSVG.outerHTML}</div><hr>`;
+
+    entregas.forEach((entrega) => {
+        html += `<div style="margin-top: 10px; page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding-bottom: 10px;">`;
+        html += `<p><strong>Recebedor:</strong> ${entrega.cliente.nome}</p>`;
+        html += `<p><strong>OS Ref.:</strong> #${String(entrega.os.id).padStart(3, '0')}</p>`;
+        html += `<p><strong>Equip.:</strong> ${entrega.os.equipamentoTipo} ${entrega.os.equipamentoMarca} ${entrega.os.equipamentoModelo}</p>`;
+        html += `<p><strong>Serial:</strong> ${entrega.os.equipamentoSerial || 'N/A'}</p>`;
+        html += `<p><strong>Problema:</strong> ${entrega.os.problemaDescricao}</p>`;
+        html += `<p><strong>Solução:</strong> ${entrega.os.observacoes || 'N/A'}</p>`;
+        html += `<p style="margin-top: 15px;"><strong>Data Entrega:</strong> ____/____/______</p>`;
+        html += `<p style="margin-top: 15px;"><strong>Ass. Recebedor:</strong></p>`;
+        html += `<div style="border-bottom: 1px solid #000; height: 30px; margin-top: 5px;"></div>`;
+        html += `</div>`;
+    });
+    
+    html += `</div>`;
+    return html;
+}
+
+// --- ALL OTHER MODULES AND FUNCTIONS (ADMIN, BACKUP, SEARCH, ETC) ---
+// --- ARE UNCHANGED FROM THE PREVIOUS VERSION. ---
+// ... (imagine all the other unchanged functions here)
+
+// --- INITIALIZATION & NAVIGATION ---
+document.addEventListener('DOMContentLoaded', function() {
+    console.log("DOM Content Loaded. Iniciando Luckhouse Games System...");
+    try {
+        const el = id => document.getElementById(id);
+        el('currentYear').textContent = new Date().getFullYear();
+        el('footerCurrentYear').textContent = new Date().getFullYear();
+        loadAllData();
+        el('formLogin').addEventListener('submit', handleLogin);
+        el('logout-button').addEventListener('click', handleLogout);
+        el('menu-toggle').addEventListener('click', () => el('wrapper').classList.toggle('toggled'));
+        
+        document.querySelectorAll('#sidebar-wrapper .nav-link[data-target]').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                navigateToSection(this.dataset.target, this);
+                if (window.innerWidth < 768) el('wrapper').classList.remove('toggled');
+            });
+        });
+        document.querySelectorAll('.dashboard-card').forEach(card => {
+            card.addEventListener('click', function() {
+                if(this.id === 'card-nova-os') {
+                    bootstrap.Modal.getOrCreateInstance(el('modalNovaOS')).show();
+                } else if (this.dataset.target) {
+                    navigateToSection(this.dataset.target);
+                }
+            });
+        });
+        checkLoginState();
+        
+        document.getElementById('modalNovaOS').addEventListener('show.bs.modal', () => {
+             populateSelectFromAux('os-equip-tipo', 'tipos');
+             populateSelectFromAux('os-equip-marca', 'marcas');
+             populateSelectFromAux('os-equip-modelo', 'modelos');
+             const servicoSelect = document.getElementById('os-servico-realizado-id');
+             servicoSelect.innerHTML = '<option value="">Nenhum/Ainda não definido</option>';
+             SERVICOS.forEach(s => { servicoSelect.innerHTML += `<option value="${s.id}">${s.nome}</option>`; });
+        });
+        document.querySelectorAll('.modal').forEach(modal => {
+             modal.addEventListener('hidden.bs.modal', function() {
+                 const form = this.querySelector('form');
+                 if (form) form.reset();
+             });
+        });
+
+    } catch (error) {
+        console.error("ERRO FATAL NA INICIALIZAÇÃO:", error);
+        document.body.innerHTML = `<div class='vh-100 d-flex align-items-center justify-content-center text-center'><h1 class='text-danger'>Erro Crítico na Aplicação. Limpe os dados do site e tente novamente.</h1></div>`;
+    }
+});
+
+function loadAllData() {
+    loadAppConfig(); loadClientes(); loadProdutos(); loadServicos(); loadOrdensServico(); loadVendas();
+    loadCadastrosAuxiliares(); loadTransacoesFinanceiras();
+    renderPdvItemList();
+    if (CURRENT_USER && CURRENT_USER.role) {
+        renderDashboardOSRecentes();
+        if (CURRENT_USER.role === 'admin') renderAdminDashboard();
+    }
+}
+
+function navigateToSection(targetId, clickedLinkElement = null) {
+    if (!CURRENT_USER.role && targetId !== 'login-prompt') { checkLoginState(); return; }
+    if (targetId === 'admin-area' && CURRENT_USER.role !== 'admin') { showToast("Acesso negado.", "danger"); return; }
+
+    document.querySelectorAll('#sidebar-wrapper .nav-link[data-target]').forEach(l => l.classList.remove('active'));
+    document.querySelectorAll('.content-section').forEach(s => { if (s.id !== 'login-prompt') s.classList.add('d-none'); });
+
+    let activeLink = clickedLinkElement || document.querySelector(`.nav-link[data-target="${targetId}"]`);
+    if(activeLink) activeLink.classList.add('active');
+    
+    const targetSection = document.getElementById(targetId);
+    if (targetSection) {
+        targetSection.classList.remove('d-none');
+    } else {
+        document.getElementById('dashboard').classList.remove('d-none');
+    }
+    
+    // Refresh data on navigation
+    if (CURRENT_USER.role) {
+        switch(targetId) {
+            case 'configuracoes': updateStoreInfoUI(); renderAuxCadastros(); break;
+            case 'os': renderOSList(); populateClienteSelect(); break;
+            case 'clientes': renderClientList(); break;
+            case 'produtos': renderProductList(); renderServiceList(); break;
+            case 'pdv': renderPdvItemList(); populatePdvClienteSelect(); break;
+            case 'dashboard': renderDashboardOSRecentes(); break;
+            case 'admin-area': renderAdminDashboard(); break;
+            case 'envio-podium': renderPodiumOSList(); break;
+        }
+    }
+}
+
+// NOTE: Only new/changed functions were included above to save space. 
+// The functions for admin, backup, etc., remain the same as the previous version.
+// To run this, you would replace the entire old script.js with this new one.
+// I am adding the rest of the functions from the previous response to make the code complete
 function setupAdminAreaModule() {
     document.getElementById('btn-export-vendas-csv').addEventListener('click', exportVendasCSV);
 }
@@ -1107,7 +1312,6 @@ function exportVendasCSV() {
     link.click();
 }
 
-// --- Backup & Search ---
 function setupSearchFilterListeners() { document.getElementById('btn-search-prodserv').addEventListener('click', filterProductServiceList); }
 function setupBackupRestoreModule() {
     document.getElementById('btn-export-data').addEventListener('click', exportData);
@@ -1164,115 +1368,6 @@ function resetAllDataWarning() {
     } else { showToast("Ação cancelada.", "info"); }
 }
 
-// --- Envio Podium Module ---
-function setupEnvioPodiumModule() {
-    document.getElementById('btn-gerar-ticket-podium').addEventListener('click', handleGerarTicketPodium);
-    document.getElementById('btn-enviar-ticket-whatsapp').addEventListener('click', enviarTicketPodiumViaWhatsApp);
-}
-
-function renderPodiumOSList() {
-    const container = document.getElementById('podium-os-list-container');
-    const osProntasParaEnvio = ORDENS_SERVICO.filter(os => os.status === 'Concluída - Aguardando Retirada');
-    if (osProntasParaEnvio.length === 0) {
-        container.innerHTML = '<p class="text-muted p-2">Nenhuma OS pronta para envio.</p>';
-        return;
-    }
-    container.innerHTML = `<ul class="list-group">${osProntasParaEnvio.map(os => {
-        const cliente = CLIENTES.find(c => c.id === os.clienteId);
-        return `<li class="list-group-item bg-dark-secondary text-white">
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" value="${os.id}" id="podium-os-${os.id}">
-                <label class="form-check-label" for="podium-os-${os.id}">
-                    <strong>OS #${String(os.id).padStart(3, '0')}</strong> - ${cliente ? cliente.nome : 'N/A'}
-                    <small class="d-block text-muted">Endereço: ${cliente ? (cliente.endereco || 'Não cadastrado') : ''}</small>
-                </label>
-            </div></li>`;
-    }).join('')}</ul>`;
-}
-
-function getSelectedEntregas() {
-    const checkedBoxes = document.querySelectorAll('#podium-os-list-container .form-check-input:checked');
-    if (checkedBoxes.length === 0) {
-        showToast("Selecione ao menos uma OS para o envio.", "warning");
-        return null;
-    }
-    const osIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
-    return osIds.map(id => {
-        const os = ORDENS_SERVICO.find(o => o.id === id);
-        const cliente = CLIENTES.find(c => c.id === os?.clienteId);
-        return { os, cliente };
-    }).filter(e => e.os && e.cliente);
-}
-
-async function handleGerarTicketPodium() {
-    const entregas = getSelectedEntregas();
-    if (!entregas) return;
-
-    const ticketHtml = await preparePodiumTicketHtml(entregas);
-    const printArea = document.getElementById('podium-ticket-print-area');
-    printArea.innerHTML = ticketHtml;
-    printArea.classList.remove('d-none');
-    
-    showToast("Comprovante gerado! Preparando impressão.", "success");
-    setTimeout(() => { window.print(); printArea.classList.add('d-none'); }, 500);
-}
-
-async function enviarTicketPodiumViaWhatsApp() {
-    const entregas = getSelectedEntregas();
-    if (!entregas) return;
-
-    const targetWhatsapp = STORE_CONFIG.whatsappEnvioTicket || (entregas[0].cliente ? entregas[0].cliente.telefone : '');
-    if (!targetWhatsapp) {
-        showToast("Nenhum WhatsApp de destino configurado ou encontrado no cliente.", "danger");
-        return;
-    }
-    
-    let message = "";
-    entregas.forEach(entrega => {
-        const template = STORE_CONFIG.templateEnvioPodium || "";
-        message += template
-            .replace(/{cliente_nome}/g, entrega.cliente.nome)
-            .replace(/{os_id}/g, String(entrega.os.id).padStart(3, '0'))
-            .replace(/{os_equipamento}/g, `${entrega.os.equipamentoTipo} ${entrega.os.equipamentoMarca}`)
-            .replace(/{loja_nome}/g, STORE_CONFIG.nomeLoja)
-            + "\n\n";
-    });
-
-    const cleanTelefone = targetWhatsapp.replace(/\D/g, '');
-    const whatsappUrl = `https://wa.me/${cleanTelefone}?text=${encodeURIComponent(message.trim())}`;
-    window.open(whatsappUrl, '_blank');
-}
-
-
-async function preparePodiumTicketHtml(entregas) {
-    let html = `<div class="podium-ticket" style="font-family: monospace; color: #000;">`;
-    html += `<h3 style="text-align: center; margin-bottom: 5px;">COMPROVANTE DE ENTREGA</h3>`;
-    html += `<p style="text-align: center; font-size: 9pt;">${STORE_CONFIG.nomeLoja}</p><hr>`;
-    
-    const barcodeValue = `ENT-${new Date().getTime()}`;
-    const barcodeSVG = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    JsBarcode(barcodeSVG, barcodeValue, { format: "CODE128", displayValue: true, fontSize: 10, height: 30 });
-    html += `<div style="text-align:center; margin-top:5px; margin-bottom: 10px;">${barcodeSVG.outerHTML}</div><hr>`;
-
-    entregas.forEach((entrega) => {
-        html += `<div style="margin-top: 10px; page-break-inside: avoid; border-bottom: 1px dashed #ccc; padding-bottom: 10px;">`;
-        html += `<p><strong>Recebedor:</strong> ${entrega.cliente.nome}</p>`;
-        html += `<p><strong>OS Ref.:</strong> #${String(entrega.os.id).padStart(3, '0')}</p>`;
-        html += `<p><strong>Equip.:</strong> ${entrega.os.equipamentoTipo} ${entrega.os.equipamentoMarca} ${entrega.os.equipamentoModelo}</p>`;
-        html += `<p><strong>Serial:</strong> ${entrega.os.equipamentoSerial || 'N/A'}</p>`;
-        html += `<p><strong>Problema:</strong> ${entrega.os.problemaDescricao}</p>`;
-        html += `<p><strong>Solução:</strong> ${entrega.os.observacoes || 'N/A'}</p>`;
-        html += `<p style="margin-top: 15px;"><strong>Data Entrega:</strong> ____/____/______</p>`;
-        html += `<p style="margin-top: 15px;"><strong>Ass. Recebedor:</strong></p>`;
-        html += `<div style="border-bottom: 1px solid #000; height: 30px; margin-top: 5px;"></div>`;
-        html += `</div>`;
-    });
-    
-    html += `</div>`;
-    return html;
-}
-
-// --- Solicitar Estoque Module ---
 function setupSolicitarEstoqueModule() {
     document.getElementById('btn-solicitar-estoque-modal').addEventListener('click', renderSolicitarEstoqueList);
     document.getElementById('btn-gerar-msg-estoque-whatsapp').addEventListener('click', gerarMsgEstoqueWhatsapp);
@@ -1316,98 +1411,4 @@ function gerarMsgEstoqueWhatsapp() {
 
     const whatsappNumber = STORE_CONFIG.podiumGamesWhatsapp.replace(/\D/g, '');
     window.open(`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(mensagem)}`, '_blank');
-}
-
-
-// --- INITIALIZATION & NAVIGATION ---
-document.addEventListener('DOMContentLoaded', function() {
-    console.log("DOM Content Loaded. Iniciando Luckhouse Games System...");
-    try {
-        const el = id => document.getElementById(id);
-        el('currentYear').textContent = new Date().getFullYear();
-        el('footerCurrentYear').textContent = new Date().getFullYear();
-        loadAllData();
-        el('formLogin').addEventListener('submit', handleLogin);
-        el('logout-button').addEventListener('click', handleLogout);
-        el('menu-toggle').addEventListener('click', () => el('wrapper').classList.toggle('toggled'));
-        
-        document.querySelectorAll('#sidebar-wrapper .nav-link[data-target]').forEach(link => {
-            link.addEventListener('click', function(e) {
-                e.preventDefault();
-                navigateToSection(this.dataset.target, this);
-                if (window.innerWidth < 768) el('wrapper').classList.remove('toggled');
-            });
-        });
-        document.querySelectorAll('.dashboard-card').forEach(card => {
-            card.addEventListener('click', function() {
-                if(this.id === 'card-nova-os') {
-                    bootstrap.Modal.getOrCreateInstance(el('modalNovaOS')).show();
-                } else if (this.dataset.target) {
-                    navigateToSection(this.dataset.target);
-                }
-            });
-        });
-        checkLoginState();
-        
-        document.getElementById('modalNovaOS').addEventListener('show.bs.modal', () => {
-             populateSelectFromAux('os-equip-tipo', 'tipos');
-             populateSelectFromAux('os-equip-marca', 'marcas');
-             populateSelectFromAux('os-equip-modelo', 'modelos');
-             const servicoSelect = document.getElementById('os-servico-realizado-id');
-             servicoSelect.innerHTML = '<option value="">Nenhum/Ainda não definido</option>';
-             SERVICOS.forEach(s => { servicoSelect.innerHTML += `<option value="${s.id}">${s.nome}</option>`; });
-        });
-        document.querySelectorAll('.modal').forEach(modal => {
-             modal.addEventListener('hidden.bs.modal', function() {
-                 const form = this.querySelector('form');
-                 if (form) form.reset();
-             });
-        });
-
-    } catch (error) {
-        console.error("ERRO FATAL NA INICIALIZAÇÃO:", error);
-        document.body.innerHTML = `<div class='vh-100 d-flex align-items-center justify-content-center text-center'><h1 class='text-danger'>Erro Crítico na Aplicação. Limpe os dados do site e tente novamente.</h1></div>`;
-    }
-});
-
-function loadAllData() {
-    loadAppConfig(); loadClientes(); loadProdutos(); loadServicos(); loadOrdensServico(); loadVendas();
-    loadCadastrosAuxiliares(); loadTransacoesFinanceiras();
-    renderPdvItemList();
-    if (CURRENT_USER && CURRENT_USER.role) {
-        renderDashboardOSRecentes();
-        if (CURRENT_USER.role === 'admin') renderAdminDashboard();
-    }
-}
-
-function navigateToSection(targetId, clickedLinkElement = null) {
-    if (!CURRENT_USER.role && targetId !== 'login-prompt') { checkLoginState(); return; }
-    if (targetId === 'admin-area' && CURRENT_USER.role !== 'admin') { showToast("Acesso negado.", "danger"); return; }
-
-    document.querySelectorAll('#sidebar-wrapper .nav-link[data-target]').forEach(l => l.classList.remove('active'));
-    document.querySelectorAll('.content-section').forEach(s => { if (s.id !== 'login-prompt') s.classList.add('d-none'); });
-
-    let activeLink = clickedLinkElement || document.querySelector(`.nav-link[data-target="${targetId}"]`);
-    if(activeLink) activeLink.classList.add('active');
-    
-    const targetSection = document.getElementById(targetId);
-    if (targetSection) {
-        targetSection.classList.remove('d-none');
-    } else {
-        document.getElementById('dashboard').classList.remove('d-none');
-    }
-    
-    // Refresh data on navigation
-    if (CURRENT_USER.role) {
-        switch(targetId) {
-            case 'configuracoes': updateStoreInfoUI(); renderAuxCadastros(); break;
-            case 'os': renderOSList(); populateClienteSelect(); break;
-            case 'clientes': renderClientList(); break;
-            case 'produtos': renderProductList(); renderServiceList(); break;
-            case 'pdv': renderPdvItemList(); populatePdvClienteSelect(); break;
-            case 'dashboard': renderDashboardOSRecentes(); break;
-            case 'admin-area': renderAdminDashboard(); break;
-            case 'envio-podium': renderPodiumOSList(); break;
-        }
-    }
 }
